@@ -1,0 +1,112 @@
+#!/usr/bin/env ruby
+
+#
+# natvis-join
+# Copyright (c) 2021 Borislav Stanimirov
+#
+# Permission is hereby granted, free of charge, to any person obtaining a copy
+# of this software and associated documentation files (the "Software"), to
+# deal in the Software without restriction, including without limitation the
+# rights to use, copy, modify, merge, publish, distribute, sublicense, and/or
+# sell copies of the Software, and to permit persons to whom the Software is
+# furnished to do so, subject to the following conditions:
+#
+# The above copyright notice and this permission notice shall be included in
+# all copies or substantial portions of the Software.
+#
+# THE SOFTWARE IS PROVIDED "AS IS", WITHOUT WARRANTY OF ANY KIND, EXPRESS OR
+# IMPLIED, INCLUDING BUT NOT LIMITED TO THE WARRANTIES OF MERCHANTABILITY,
+# FITNESS FOR A PARTICULAR PURPOSE AND NONINFRINGEMENT. IN NO EVENT SHALL THE
+# AUTHORS OR COPYRIGHT HOLDERS BE LIABLE FOR ANY CLAIM, DAMAGES OR OTHER
+# LIABILITY, WHETHER IN AN ACTION OF CONTRACT, TORT OR OTHERWISE, ARISING
+# FROM, OUT OF OR IN CONNECTION WITH THE SOFTWARE OR THE USE OR OTHER DEALINGS
+# IN THE SOFTWARE.
+#
+require 'nokogiri'
+
+VERSION = '0.1.0'
+
+VERSION_TEXT = "natvis-join v#{VERSION}"
+
+USAGE = <<USG
+
+Usage:
+    natvis-join <paths> [-o <output_file>]
+USG
+
+HELP = <<HLP
+
+Join Visual Studio native debug visualizer (.natvis) files into one
+
+Options:
+
+    paths:          Paths to files and/or directories. All files from the list
+                    and all .natvis files from the lited directories will be
+                    joined.
+
+    -o, --output    Optional output file. Without it the output goes to STDOUT
+    -h, -?, --help  Show this help message
+    -v, --version   Print version
+
+HLP
+
+begin
+  raise USAGE if ARGV.empty?
+  case ARGV[0]
+  when '-v', '--version'
+    puts VERSION_TEXT
+    exit(0)
+  when '-h', '-?', '--help'
+    puts VERSION_TEXT
+    puts USAGE
+    puts HELP
+    exit(0)
+  end
+
+  output = STDOUT
+  paths = []
+
+  output_arg = false
+  ARGV.each do |arg|
+    if arg == '-o' || arg == '--output'
+      output_arg = true
+      next
+    elsif output_arg
+      output = File.open(arg, 'w')
+      output_arg = false
+      next
+    else
+      paths << arg
+    end
+  end
+
+  AutoVisualizer = 'AutoVisualizer'
+
+  result_doc = Nokogiri::XML <<~XML
+    <?xml version="1.0" encoding="utf-8"?>
+    <AutoVisualizer xmlns="http://schemas.microsoft.com/vstudio/debugger/natvis/2010">
+    </AutoVisualizer>
+  XML
+
+  paths.map { |p|
+    next p if File.file?(p)
+    next Dir[File.join(p, '*.natvis')] if File.directory?(p)
+    raise "Provided path '#{p}' was not found"
+    nil
+  }.compact.flatten.each do |f|
+    begin
+      result_doc.root.add_child("  <!-- #{f} -->")
+      Nokogiri::XML(File.read(f)).root.children.each do |node|
+        result_doc.root.add_child(node)
+      end
+    rescue
+      raise "Invalid xml in '#{f}'"
+    end
+  end
+
+  output.puts result_doc
+rescue StandardError => e
+  STDERR.puts e.message
+  exit(1)
+end
+
